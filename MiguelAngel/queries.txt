@@ -1,0 +1,272 @@
+Indices dados de alta:
+  - Colección publicaciones:
+      id_: (es una clave primaria, por lo que el indice es unique, en el proceso de creacion de los ficheros json en vez de _id puse id_, hay que arreglarlo)
+	  authors: indice sobre lista de autores
+	  publicationType : indice sobre tipo de publicacion
+	  year:  indice sobre año de publicacion:
+	   
+	
+  - Colección autores:
+	  id_: (es una clave primaria, por lo que el indice es unique, en el proceso de creacion de los ficheros json en vez de _id puse id_, hay que arreglarlo)
+	  name:  nombre del autor
+	  publicationsRelated:  indice sobre la coleccion de publicaciones asociadas (este campo al final no se si hace falta)
+  
+
+Consulta numero 1:
+
+ - Hecha desde el lado del autor con la coleccion de publicaciones (no me gusta) He puesto el nombre de un autor para la prueba:
+ 
+ [{$match: {
+  name: 'Paul Kocher'
+}}, {$unwind: {
+  path: '$publicationsRelated',
+  preserveNullAndEmptyArrays: false
+}}, {$lookup: {
+  from: 'publicaciones',
+  localField: 'publicationsRelated',
+  foreignField: 'id_',
+  as: 'publication'
+}}, {$project: {
+  publication: 1,
+  _id: 0
+}}, {$unwind: {
+  path: '$publication'
+}}]
+
+ - hecha desde el lado del autor con la coleccion de autores en la publicacion (me gusta mas) He puesto el nombre de un autor para la prueba:
+ 
+ [{$match: {
+  name: 'Paul Kocher'
+}}, {$lookup: {
+  from: 'publicaciones',
+  localField: 'id_',
+  foreignField: 'authors',
+  as: 'publicaciones'
+}}, {$project: {
+  publicaciones: 1,
+  _id: 0
+}}, {$unwind: {
+  path: '$publicaciones'
+}}]
+
+Consulta numero 2 (hecha desde el lado del autor) He puesto el nombre de un autor para la prueba:
+
+[{
+    $match: {
+        name: 'Paul Kocher'
+    }
+}, {
+    $lookup: {
+        from: 'publicaciones',
+        localField: 'id_',
+        foreignField: 'authors',
+        as: 'publicaciones'
+    }
+}, {
+    $project: {
+        numeroPublicaciones: {
+            $size: '$publicaciones'
+        },
+        _id: 0
+    }
+}]
+
+Consulta numero 3 (hecha desde el lado de la publicacion):
+
+[{$match: {
+  $and: [
+    {
+      publicationType: {
+        $eq: 'article'
+      }
+    },
+    {
+      year: {
+        $eq: 2018
+      }
+    }
+  ]
+}}, {$count: 'id_'}]
+
+Consulta numero 4 (hecha desde el lado de la publicacion):
+
+[{$unwind: {
+  path: '$authors',
+  preserveNullAndEmptyArrays: false
+}}, {$project: {
+  authors: 1
+}}, {$group: {
+  _id: '$authors',
+  totalDocumentos: {
+    $sum: 1
+  }
+}}, {$match: {
+  totalDocumentos: {
+    $lt: 5
+  }
+}}, {$count: 'totalCount'}]
+
+
+
+Consulta numero 5 (ojo que sale incollection en vez de inproceedings) Hecha desde el lado de la publicacion:
+
+[{$unwind: {
+  path: '$authors',
+  preserveNullAndEmptyArrays: false
+}}, {$group:  {
+  '_id':  '$authors', 
+  'totalDocumentos': {
+                '$sum': 1
+            },
+  documentTypes: { $push:  { publicationType: "$publicationType" } }
+}}, {$sort: {
+  totalDocumentos: -1
+}}, {$limit: 10}, {$lookup: {
+  from: 'autores',
+  localField: '_id',
+  foreignField: 'id_',
+  as: 'autor'
+}}, {$addFields: {
+   numeroArticulos : {
+     "$size": {
+            "$filter": {
+            "input": "$documentTypes.publicationType",
+            "cond": { "$eq": [ "$$this", "article" ] }
+          }
+     }
+  },
+  numeroInProceedigs : {
+     "$size": {
+            "$filter": {
+            "input": "$documentTypes.publicationType",
+            "cond": { "$eq": [ "$$this", "inproceedings" ] }
+          }
+     }
+  }
+
+    }}, {$project: {
+  totalDocumentos: 1,
+  numeroArticulos: 1,
+  numeroInProceedigs: 1,
+  autor: { $arrayElemAt: [ "$autor", 0 ] },
+  _id: 0
+}}]
+
+Consulta numero 6 (lado de las publicaciones):
+
+[{$addFields: {
+  numeroAutores: {$size: {"$ifNull": [ "$authors", [] ]} }
+}}, {$project: {
+  publicationType : 1,
+  numeroAutores : 1
+}}, {$group: {
+  _id: '$publicationType',
+  numeroPublicaciones: {
+    '$sum': 1
+  },
+  numeroMedioAutores: {
+    '$avg': '$numeroAutores'
+  }
+}}]
+
+Consulta numero 7 (lado de los autores) He puesto el nombre de un autor para la prueba:
+
+[{$match: {
+  name : 'Paul Kocher'
+}}, {$lookup: {
+  from: 'publicaciones',
+  localField: 'id_',
+  foreignField: 'authors',
+  as: 'publicaciones'
+}}, {$project: {
+  id_: 1,
+  name: 1,
+  "listadosCoautores": {
+    $filter: {
+      input : { "$reduce": {
+                        "input": "$publicaciones.authors",
+                        "initialValue": [],
+                        "in": { "$setUnion": ["$$value", "$$this"] }
+            }},
+      as: "num",
+      cond: {
+        $ne: [ "$$num", "$id_" ]
+      }
+    }
+  }
+
+        }}, {$lookup: {
+  from: 'autores',
+  localField: 'listadosCoautores',
+  foreignField: 'id_',
+  as: 'detalleListadoCoautores'
+}}]
+
+
+ Consulta numero 8 (lado de los autores, ineficiente.):
+ 
+ [{$lookup: {
+  from: 'publicaciones',
+  localField: 'id_',
+  foreignField: 'authors',
+  as: 'publicaciones'
+}}, {$project: {
+  id_ :1 ,
+  name : 1,
+  difference: {
+  $subtract: [ {"$max": "$publicaciones.year"},
+               {"$min": "$publicaciones.year"}
+             ]
+  }
+
+            }}, {$sort: {
+  difference: -1
+}}, {$limit: 5}]
+ 
+ Consulta numero 9 (lado de los autores, ineficiente):
+ 
+ [{$lookup: {
+  from: 'publicaciones',
+  localField: 'id_',
+  foreignField: 'authors',
+  as: 'publicaciones'
+}}, {$project: {
+  id_: 1,
+  name: 1,
+  difference: {
+    $subtract: [
+      {
+        $max: '$publicaciones.year'
+      },
+      {
+        $min: '$publicaciones.year'
+      }
+    ]
+  }
+}}, {$match: {
+  difference : { $lt: 5 }
+}}, {$count: 'id_'}]
+
+Consulta numero 10 (lado de las publicaciones, seguro que hay una forma mas sencilla de hacerla sin dar tantas vueltas):
+
+[{$group: {
+  _id: '$publicationType',
+  numeroElementos: {
+    $sum: 1
+  }
+}}, {$group: {
+  _id: null,
+  elementos : {$push : {clave: '$_id',valor :"$numeroElementos"}},
+  total : {$sum : '$numeroElementos'}
+}}, {$unwind: {
+  path: '$elementos',
+  preserveNullAndEmptyArrays: false
+}}, {$match: {
+   'elementos.clave' : "article" 
+}}, {$project: {
+  proporcion : {$divide : [ '$elementos.valor' ,'$total']}
+}}]
+ 
+
+
+
